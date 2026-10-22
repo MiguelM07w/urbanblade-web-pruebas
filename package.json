@@ -9,6 +9,8 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "lint": "eslint .",
+     "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "playwright test",
     "e2e:servers": "node scripts/e2e-servers.mjs",
     "cypress:run": "cypress run",
@@ -37,14 +39,18 @@
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.17.0",
+    "@nuxt/test-utils": "^4.3.4",
     "@playwright/test": "^1.63.0",
-    "cypress": "^16.1.1",
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/vite": "^4.3.3",
     "@types/three": "^0.186.0",
+    "@vue/test-utils": "^2.5.1",
+    "cypress": "^16.1.1",
     "eslint": "^10.11.0",
+    "happy-dom": "^21.0.4",
     "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
   }
 }
