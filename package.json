@@ -29,7 +29,7 @@
     "@fullcalendar/timegrid": "^6.1.21",
     "@fullcalendar/vue3": "^6.1.21",
     "@nuxt/fonts": "^0.14.0",
-    "@stripe/stripe-js": "^9.15.0",
+    "@stripe/stripe-js": "^10.1.0",
     "chart.js": "^4.5.1",
     "nuxt": "^4.5.2",
     "three": "^0.186.1",
