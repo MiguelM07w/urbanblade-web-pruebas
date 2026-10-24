@@ -1,40 +1,11 @@
 <script setup lang="ts">
 import { loadStripe, type Stripe, type StripeCardElement, type StripeElements } from '@stripe/stripe-js'
 import type { ChoiceOption } from '~/types/choice'
+import type { BarberRow, ProductRow, ServiceRow, Slot } from '~/types/booking'
 
 const props = withDefaults(defineProps<{ initialBarber?: string, embedded?: boolean }>(), { initialBarber: '', embedded: false })
 const emit = defineEmits<{ confirmed: [code: string], busy: [value: boolean] }>()
 
-interface ServiceRow {
-  id: string
-  nombre: string
-  categoria: string | null
-  precio: number
-  duracion_min: number
-  descripcion: string | null
-  imagen: string | null
-}
-interface BarberRow {
-  id: string
-  slug: string | null
-  user: { id: string, name: string } | null
-  especialidades: string | null
-  foto: string | null
-  avg_rating: number | null
-  total_reviews: number
-  citas_conmigo: number | null
-  es_favorito: boolean
-}
-interface ProductRow {
-  id: string
-  nombre: string
-  categoria: string | null
-  descripcion: string | null
-  precio_venta: number
-  stock_actual: number
-  imagen: string | null
-}
-interface Slot { time: string, label: string }
 interface Barbershop {
   nombre: string | null
   direccion: string | null
@@ -57,19 +28,7 @@ if (isAuthenticated.value && !user.value) {
   await fetchMe()
 }
 
-// ── Estado del asistente ──────────────────────────────────────────────────
-// La query SOLO se lee al entrar (enlace/QR con ?servicio=, y el regreso del
-// login) y se vuelve a escribir UNA vez, al saltar al login (ver currentUrl()).
-// Deliberadamente NO se espeja en la URL en cada selección: app.vue monta la
-// página con :key="route.fullPath", así que cada cambio de query remonta el
-// componente completo, vuelve a pedir los catálogos y reproduce la transición
-// de página -- un remonte por cada toque del visitante.
-const serviceId = ref(typeof route.query.servicio === 'string' ? route.query.servicio : '')
-const barberId = ref(props.initialBarber || (typeof route.query.barbero === 'string' ? route.query.barbero : ''))
-const date = ref(typeof route.query.fecha === 'string' ? route.query.fecha : '')
-const time = ref(typeof route.query.hora === 'string' ? route.query.hora : '')
 const notes = ref('')
-const activeStep = ref<number | null>(null)
 
 // ── Datos públicos ────────────────────────────────────────────────────────
 const { data: shopData } = await useAsyncData<{ data: Barbershop }>(
@@ -101,50 +60,47 @@ const { data: productsData } = await useAsyncData<{ data: ProductRow[] }>(
 const suggestedProducts = computed(() =>
   (productsData.value?.data ?? []).filter(p => p.stock_actual > 0).slice(0, 4),
 )
-const selectedProductIds = ref<Set<string>>(new Set())
-function toggleProduct(id: string) {
-  const next = new Set(selectedProductIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selectedProductIds.value = next
-}
-const selectedProducts = computed(() =>
-  suggestedProducts.value.filter(p => selectedProductIds.value.has(p.id)),
-)
-const productsTotal = computed(() => selectedProducts.value.reduce((sum, p) => sum + p.precio_venta, 0))
 
-// ── Descuento de membresia/lealtad ───────────────────────────────────────
-// El mismo % que ya calcula PaymentService al cobrar (ver
-// LoyaltyService::bestDiscountPct) -- se muestra aqui solo como referencia
-// honesta de cuanto va a pagar realmente, sea que pague ahora o despues.
+// Descuento de membresía/lealtad del cliente (0 si es invitado); el cálculo del
+// precio con descuento vive en el ViewModel.
 const membershipDiscountPct = computed(() => user.value?.client?.descuento_activo_pct ?? 0)
-const discountedServicePrice = computed(() => {
-  const base = selectedService.value?.precio ?? 0
-  return membershipDiscountPct.value > 0
-    ? Math.round(base * (1 - membershipDiscountPct.value / 100) * 100) / 100
-    : base
-})
 
-// ── Propina sugerida ──────────────────────────────────────────────────────
-// Se calcula sobre el precio YA con descuento (mismo criterio que
-// loyaltyCharge.ts usa en recepcion: descuento primero, propina despues).
-const TIP_PRESETS = [0, 0.10, 0.15, 0.20] as const
-const tipPreset = ref<number>(0)
-const customTip = ref<string>('')
-const usingCustomTip = computed(() => customTip.value !== '')
-const tipAmount = computed(() => {
-  if (usingCustomTip.value) {
-    const parsed = Number(customTip.value)
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
-  }
-  return Math.round(discountedServicePrice.value * tipPreset.value)
-})
-function pickTipPreset(pct: number) {
-  tipPreset.value = pct
-  customTip.value = ''
+// ── ViewModel del asistente (T085) ───────────────────────────────────────
+// La selección, los pasos, los precios y los horarios viven en
+// useBookingWizard (app/composables/useBookingWizard.ts) para poder probarlos
+// sin montar esta página. Aquí se le pasan los catálogos ya cargados y la API
+// real; las pruebas le pasan datos de ejemplo y una API falsa.
+//
+// La query SOLO se lee al entrar (enlace/QR con ?servicio=, y el regreso del
+// login) y se vuelve a escribir UNA vez, al saltar al login (ver currentUrl()).
+// Deliberadamente NO se espeja en la URL en cada selección: app.vue monta la
+// página con :key="route.fullPath", así que cada cambio de query remonta el
+// componente completo, vuelve a pedir los catálogos y reproduce la transición
+// de página -- un remonte por cada toque del visitante.
+function queryParam(key: string) {
+  const value = route.query[key]
+  return typeof value === 'string' ? value : ''
 }
-
-const grandTotal = computed(() => discountedServicePrice.value + productsTotal.value + tipAmount.value)
+const {
+  serviceId, barberId, date, time, activeStep,
+  selectedService, selectedBarber, step, pickService, pickBarber, goToStep,
+  selectedProductIds, selectedProducts, toggleProduct,
+  discountedServicePrice, TIP_PRESETS, tipPreset, customTip, usingCustomTip, tipAmount, pickTipPreset,
+  grandTotal, payAmountToCharge,
+  days, slots, slotsPending, slotsFailed, loadSlots, groupedSlots,
+} = useBookingWizard({
+  services,
+  barbers,
+  suggestedProducts,
+  discountPct: membershipDiscountPct,
+  initial: {
+    serviceId: queryParam('servicio'),
+    barberId: props.initialBarber || queryParam('barbero'),
+    date: queryParam('fecha'),
+    time: queryParam('hora'),
+  },
+  fetchSlots: query => apiFetch<{ slots: Slot[] }>('/availability/slots', { query }),
+})
 
 // ── Pagar ahora vs pagar despues (Fase 7) ────────────────────────────────
 // "Pagar ahora" reutiliza el mecanismo de deposito anti-no-show tal cual
@@ -153,7 +109,6 @@ const grandTotal = computed(() => discountedServicePrice.value + productsTotal.v
 // forzar el cambio de comportamiento a nadie que solo quiera reservar.
 type PayChoice = 'despues' | 'ahora_tarjeta' | 'ahora_transferencia'
 const payChoice = ref<PayChoice>('despues')
-const payAmountToCharge = computed(() => discountedServicePrice.value + tipAmount.value)
 
 let stripe: Stripe | null = null
 let elements: StripeElements | null = null
@@ -239,90 +194,6 @@ async function toggleFavorite(barber: BarberRow) {
   }
 }
 
-const selectedService = computed(() => services.value.find(s => s.id === serviceId.value) ?? null)
-const selectedBarber = computed(() => barbers.value.find(b => b.id === barberId.value) ?? null)
-
-// ── Días ofrecidos ────────────────────────────────────────────────────────
-// Fechas armadas en horario local, nunca con toISOString(): el backend valida
-// 'after_or_equal:today' contra America/Mexico_City, y en UTC-6 el ISO de
-// "hoy por la noche" ya cae en mañana.
-function localISO(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-const days = computed(() => Array.from({ length: 14 }, (_, i) => {
-  const d = new Date()
-  d.setDate(d.getDate() + i)
-
-  return {
-    iso: localISO(d),
-    weekday: d.toLocaleDateString('es-MX', { weekday: 'short' }),
-    day: d.getDate(),
-    month: d.toLocaleDateString('es-MX', { month: 'short' }),
-    isToday: i === 0,
-  }
-}))
-
-// ── Horarios reales ───────────────────────────────────────────────────────
-const slots = ref<Slot[]>([])
-const slotsPending = ref(false)
-const slotsFailed = ref(false)
-let slotsRequest = 0
-
-async function loadSlots() {
-  const request = ++slotsRequest
-  if (!serviceId.value || !barberId.value || !date.value) {
-    slots.value = []
-    slotsPending.value = false
-    return
-  }
-  slotsPending.value = true
-  slotsFailed.value = false
-  try {
-    const res = await apiFetch<{ slots: Slot[] }>('/availability/slots', {
-      query: { barber_id: barberId.value, service_id: serviceId.value, date: date.value },
-    })
-    if (request !== slotsRequest) return
-    slots.value = res.slots ?? []
-    if (time.value && !slots.value.some(s => s.time === time.value)) {
-      time.value = ''
-    }
-  }
-  catch {
-    if (request !== slotsRequest) return
-    slotsFailed.value = true
-    slots.value = []
-  }
-  finally {
-    if (request === slotsRequest) slotsPending.value = false
-  }
-}
-watch([serviceId, barberId, date], loadSlots, { immediate: true })
-
-// Agrupar horarios por franja del día -- una sola lista plana de 20+ botones
-// se siente vacia/monotona aunque haya bastante disponibilidad; agruparlos
-// con un encabezado da la sensacion de "hay opciones organizadas" en vez de
-// "aqui hay una lista".
-const SLOT_GROUPS = [
-  { key: 'manana', label: 'Mañana', max: 12 * 60 },
-  { key: 'tarde', label: 'Tarde', max: 18 * 60 },
-  { key: 'noche', label: 'Noche', max: Infinity },
-] as const
-
-function slotMinutes(time: string): number {
-  const [h, m] = time.split(':').map(Number)
-  return (h ?? 0) * 60 + (m ?? 0)
-}
-
-const groupedSlots = computed(() => {
-  const groups = SLOT_GROUPS.map(g => ({ ...g, slots: [] as Slot[] }))
-  for (const slot of slots.value) {
-    const minutes = slotMinutes(slot.time)
-    const group = groups.find(g => minutes < g.max) ?? groups[groups.length - 1]!
-    group.slots.push(slot)
-  }
-  return groups.filter(g => g.slots.length)
-})
-
 // ── Lista de espera (cuando el día elegido ya no tiene horarios) ──────────
 // Mismo criterio de quién puede reservar (canBookHere, definido más abajo)
 // -- solo cliente o invitado, nunca staff/barbero.
@@ -362,30 +233,8 @@ async function joinWaitlist() {
 }
 
 // ── Pasos ─────────────────────────────────────────────────────────────────
+// Solo los nombres que se muestran; en qué paso va el cliente lo decide el ViewModel.
 const STEPS = ['Servicio', 'Barbero', 'Horario', 'Confirmar'] as const
-const step = computed(() => {
-  if (activeStep.value !== null) return activeStep.value
-  if (!serviceId.value) return 0
-  if (!barberId.value) return 1
-  if (!date.value || !time.value) return 2
-
-  return 3
-})
-
-function pickService(id: string) {
-  activeStep.value = null
-  serviceId.value = id
-  time.value = ''
-}
-function pickBarber(id: string) {
-  activeStep.value = null
-  barberId.value = id
-  time.value = ''
-}
-function goToStep(target: number) {
-  // Revisar un paso no destruye el borrador. Cambiar la selección invalida la hora.
-  activeStep.value = target
-}
 
 // ── Confirmación ──────────────────────────────────────────────────────────
 // El backend solo deja reservar para sí mismo al rol cliente; admin y

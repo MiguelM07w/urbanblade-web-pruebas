@@ -34,6 +34,11 @@ jobs:
       - name: ESLint
         run: npx eslint . --max-warnings=0
 
+      # Pruebas unitarias de lógica y componentes (Vitest + Vue Test Utils, T084).
+      # Ejecuta las pruebas de test/nuxt/; si alguna falla, el job falla y el PR queda en rojo.
+      - name: Pruebas unitarias (Vitest)
+        run: npm test
+
       - name: Build
         run: npm run build
         env:
